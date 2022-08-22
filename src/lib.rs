@@ -7,9 +7,12 @@ mod util;
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
+#[cfg(test)]
+extern crate std;
+
+pub use crate::keep_last::KeepLast;
 pub use array::Array;
 use array::StaticArray;
-pub use keep_last::KeepLast;
 
 pub trait KeepLastExt: Iterator {
     fn keep_last(self) -> KeepLast<Self, [Self::Item; 1]>
@@ -36,4 +39,4 @@ pub trait KeepLastExt: Iterator {
     }
 }
 
-impl<I: Iterator> KeepLastExt for I {}
+impl<I: Iterator> KeepLastExt for I where I::Item: Clone {}

@@ -41,13 +41,18 @@ impl<I: Iterator, B: Array<Item = I::Item>> KeepLast<I, B> {
     }
 
     #[inline]
+    pub fn position(&self) -> usize {
+        self.backtrack
+    }
+
+    #[inline]
     pub fn backtrack(&mut self, n: usize) {
         self.backtrack_to(self.backtrack.saturating_add(n))
     }
 
     #[inline]
     pub fn backtrack_to(&mut self, n: usize) {
-        self.backtrack = n.min(self.capacity())
+        self.backtrack = n.min(self.len())
     }
 
     #[inline]
@@ -144,5 +149,74 @@ impl<I: Iterator, B: Array<Item = I::Item>> Drop for KeepLast<I, B> {
     #[inline]
     fn drop(&mut self) {
         self.clear();
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use core::ops::Deref;
+
+    use alloc::{boxed::Box, vec::Vec};
+
+    use crate::KeepLastExt;
+
+    #[test]
+    fn test_partial_filled() {
+        let arr = (0..20).collect::<Vec<_>>();
+        let mut iter = arr.iter().copied().map(Box::new).keep_last_with::<[_; 5]>();
+
+        assert_eq!(iter.next().as_deref(), Some(&0));
+        assert_eq!(iter.next().as_deref(), Some(&1));
+        assert_eq!(iter.next().as_deref(), Some(&2));
+
+        iter.clear();
+
+        assert_eq!(iter.next().as_deref(), Some(&3));
+        assert_eq!(iter.next().as_deref(), Some(&4));
+        assert_eq!(iter.next().as_deref(), Some(&5));
+    }
+
+    #[test]
+    fn test_keep_last() {
+        let arr = (0..20).collect::<Vec<_>>();
+
+        let mut iter = arr.iter().copied().map(Box::new);
+        let mut keep_last = iter.by_ref().take(15).keep_last_with::<[_; 5]>();
+
+        // normal iteration:
+
+        assert_eq!(keep_last.next().as_deref(), Some(&0));
+        assert_eq!(keep_last.next().as_deref(), Some(&1));
+        assert_eq!(keep_last.next().as_deref(), Some(&2));
+
+        assert!(keep_last.peek().iter().map(Deref::deref).copied().eq(0..3));
+
+        // backtrack
+
+        keep_last.backtrack(2);
+
+        assert_eq!(keep_last.next().as_deref(), Some(&1));
+        assert_eq!(keep_last.next().as_deref(), Some(&2));
+
+        keep_last.peek_mut()[0] = Box::new(-1);
+
+        keep_last.backtrack(5);
+        assert_eq!(keep_last.position(), 3);
+
+        assert_eq!(keep_last.next().as_deref(), Some(&-1));
+        assert_eq!(keep_last.next().as_deref(), Some(&1));
+        assert_eq!(keep_last.next().as_deref(), Some(&2));
+
+        for i in 3..10 {
+            assert_eq!(keep_last.next().as_deref(), Some(&i));
+        }
+
+        assert!(keep_last.peek().iter().map(Deref::deref).copied().eq(5..10));
+
+        keep_last.backtrack(5);
+        assert_eq!(keep_last.position(), 5);
+        assert!(keep_last.map(|boxed| *boxed).eq(5..15));
+
+        iter.map(|boxed| *boxed).eq(15..20);
     }
 }
