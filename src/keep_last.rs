@@ -57,7 +57,7 @@ impl<I: Iterator, B: Array<Item = I::Item>> KeepLast<I, B> {
 
     #[inline]
     unsafe fn drop_buffer(&mut self) {
-        self.peek_raw_mut()
+        self.as_uninit_slice_mut()
             .iter_mut()
             .for_each(|ptr| ptr.assume_init_drop())
     }
@@ -70,24 +70,24 @@ impl<I: Iterator, B: Array<Item = I::Item>> KeepLast<I, B> {
     }
 
     #[inline]
-    fn peek_raw(&self) -> &[MaybeUninit<I::Item>] {
+    pub fn as_uninit_slice(&self) -> &[MaybeUninit<I::Item>] {
         &self.buf.as_slice()[..self.len()]
     }
 
     #[inline]
-    fn peek_raw_mut(&mut self) -> &mut [MaybeUninit<I::Item>] {
+    pub fn as_uninit_slice_mut(&mut self) -> &mut [MaybeUninit<I::Item>] {
         let len = self.len();
         &mut self.buf.as_mut_slice()[..len]
     }
 
     #[inline]
-    pub fn peek(&self) -> &[I::Item] {
-        unsafe { slice_assume_init_ref(self.peek_raw()) }
+    pub fn as_slice(&self) -> &[I::Item] {
+        unsafe { slice_assume_init_ref(self.as_uninit_slice()) }
     }
 
     #[inline]
-    pub fn peek_mut(&mut self) -> &mut [I::Item] {
-        unsafe { slice_assume_init_mut(self.peek_raw_mut()) }
+    pub fn as_slice_mut(&mut self) -> &mut [I::Item] {
+        unsafe { slice_assume_init_mut(self.as_uninit_slice_mut()) }
     }
 }
 
@@ -134,14 +134,14 @@ where
 impl<I: Iterator, B: Array<Item = I::Item>> AsRef<[I::Item]> for KeepLast<I, B> {
     #[inline]
     fn as_ref(&self) -> &[I::Item] {
-        self.peek()
+        self.as_slice()
     }
 }
 
 impl<I: Iterator, B: Array<Item = I::Item>> AsMut<[I::Item]> for KeepLast<I, B> {
     #[inline]
     fn as_mut(&mut self) -> &mut [I::Item] {
-        self.peek_mut()
+        self.as_slice_mut()
     }
 }
 
@@ -189,7 +189,12 @@ mod test {
         assert_eq!(keep_last.next().as_deref(), Some(&1));
         assert_eq!(keep_last.next().as_deref(), Some(&2));
 
-        assert!(keep_last.peek().iter().map(Deref::deref).copied().eq(0..3));
+        assert!(keep_last
+            .as_slice()
+            .iter()
+            .map(Deref::deref)
+            .copied()
+            .eq(0..3));
 
         // backtrack
 
@@ -198,7 +203,7 @@ mod test {
         assert_eq!(keep_last.next().as_deref(), Some(&1));
         assert_eq!(keep_last.next().as_deref(), Some(&2));
 
-        keep_last.peek_mut()[0] = Box::new(-1);
+        keep_last.as_slice_mut()[0] = Box::new(-1);
 
         keep_last.backtrack(5);
         assert_eq!(keep_last.position(), 3);
@@ -211,7 +216,12 @@ mod test {
             assert_eq!(keep_last.next().as_deref(), Some(&i));
         }
 
-        assert!(keep_last.peek().iter().map(Deref::deref).copied().eq(5..10));
+        assert!(keep_last
+            .as_slice()
+            .iter()
+            .map(Deref::deref)
+            .copied()
+            .eq(5..10));
 
         keep_last.backtrack(5);
         assert_eq!(keep_last.position(), 5);
