@@ -7,7 +7,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-uninit = { version = "0.5.0", default-features = false, features = [
+uninit = { version = "0.5.1", default-features = false, features = [
     "const_generics",
 ] }
 
