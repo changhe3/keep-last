@@ -56,8 +56,8 @@ impl<T, const N: usize> StaticArray for [T; N] {}
 mod alloc {
     use core::mem::MaybeUninit;
 
-    use alloc::boxed::Box;
-    use uninit::prelude::BoxNewUninitSlice;
+    use alloc::{boxed::Box, vec::Vec};
+    use uninit::prelude::VecCapacity;
 
     use crate::util::uninit_array;
 
@@ -84,7 +84,7 @@ mod alloc {
         type Uninit = Box<[MaybeUninit<T>]>;
 
         fn new_uninit(capacity: usize) -> Self::Uninit {
-            <Self as BoxNewUninitSlice<T>>::new_uninit_slice(capacity)
+            Vec::with_capacity(capacity).into_backing_buffer_forget_elems()
         }
     }
 }
