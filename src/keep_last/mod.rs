@@ -1,4 +1,7 @@
-use core::mem::MaybeUninit;
+use core::{
+    mem::MaybeUninit,
+    ops::{Deref, DerefMut},
+};
 
 use uninit::prelude::AsOut;
 
@@ -86,7 +89,7 @@ impl<I: Iterator, B: Array<Item = I::Item>> KeepLast<I, B> {
     }
 
     #[inline]
-    pub fn as_slice_mut(&mut self) -> &mut [I::Item] {
+    pub fn as_mut_slice(&mut self) -> &mut [I::Item] {
         unsafe { slice_assume_init_mut(self.as_uninit_slice_mut()) }
     }
 }
@@ -141,7 +144,7 @@ impl<I: Iterator, B: Array<Item = I::Item>> AsRef<[I::Item]> for KeepLast<I, B> 
 impl<I: Iterator, B: Array<Item = I::Item>> AsMut<[I::Item]> for KeepLast<I, B> {
     #[inline]
     fn as_mut(&mut self) -> &mut [I::Item] {
-        self.as_slice_mut()
+        self.as_mut_slice()
     }
 }
 
@@ -149,6 +152,20 @@ impl<I: Iterator, B: Array<Item = I::Item>> Drop for KeepLast<I, B> {
     #[inline]
     fn drop(&mut self) {
         self.clear();
+    }
+}
+
+impl<I: Iterator, B: Array<Item = I::Item>> Deref for KeepLast<I, B> {
+    type Target = [I::Item];
+
+    fn deref(&self) -> &Self::Target {
+        self.as_slice()
+    }
+}
+
+impl<I: Iterator, B: Array<Item = I::Item>> DerefMut for KeepLast<I, B> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.as_mut_slice()
     }
 }
 
@@ -203,7 +220,7 @@ mod test {
         assert_eq!(keep_last.next().as_deref(), Some(&1));
         assert_eq!(keep_last.next().as_deref(), Some(&2));
 
-        keep_last.as_slice_mut()[0] = Box::new(-1);
+        keep_last[0] = Box::new(-1);
 
         keep_last.backtrack(5);
         assert_eq!(keep_last.position(), 3);
