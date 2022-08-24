@@ -59,15 +59,15 @@ impl<I: Iterator, B: Array<Item = I::Item>> KeepLast<I, B> {
     }
 
     #[inline]
-    unsafe fn drop_buffer(&mut self) {
-        self.as_uninit_slice_mut()
-            .iter_mut()
-            .for_each(|ptr| ptr.assume_init_drop())
+    unsafe fn drop_in_place(&mut self) {
+        let buf = self.as_mut_slice();
+        let ptr = buf as *mut [I::Item];
+        ptr.drop_in_place();
     }
 
     #[inline]
     pub fn clear(&mut self) {
-        unsafe { self.drop_buffer() };
+        unsafe { self.drop_in_place() };
         self.write_idx = 0;
         self.backtrack = 0;
     }
