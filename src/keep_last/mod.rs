@@ -1,13 +1,15 @@
+mod drain;
+
 use core::{
     mem::MaybeUninit,
-    ops::{Deref, DerefMut},
+    ops::{Deref, DerefMut, Index, IndexMut, Range, RangeBounds},
 };
 
 use uninit::prelude::AsOut;
 
 use crate::{
     array::{Array, AsSlice, StaticArray},
-    util::{slice_assume_init_mut, slice_assume_init_ref},
+    util::{slice_assume_init_mut, slice_assume_init_ref, slice_range},
 };
 
 pub struct KeepLast<I: Iterator, B: Array<Item = I::Item>> {
@@ -60,7 +62,7 @@ impl<I: Iterator, B: Array<Item = I::Item>> KeepLast<I, B> {
 
     #[inline]
     unsafe fn drop_in_place(&mut self) {
-        let buf = self.as_mut_slice();
+        let buf = self.as_init_slice_mut();
         let ptr = buf as *mut [I::Item];
         ptr.drop_in_place();
     }
@@ -74,23 +76,78 @@ impl<I: Iterator, B: Array<Item = I::Item>> KeepLast<I, B> {
 
     #[inline]
     pub fn as_uninit_slice(&self) -> &[MaybeUninit<I::Item>] {
-        &self.buf.as_slice()[..self.len()]
+        self.buf.as_slice()
     }
 
     #[inline]
     pub fn as_uninit_slice_mut(&mut self) -> &mut [MaybeUninit<I::Item>] {
+        self.buf.as_mut_slice()
+    }
+
+    #[inline]
+    pub fn as_init_slice(&self) -> &[I::Item] {
+        unsafe { slice_assume_init_ref(&self.as_uninit_slice()[..self.len()]) }
+    }
+
+    #[inline]
+    pub fn as_init_slice_mut(&mut self) -> &mut [I::Item] {
         let len = self.len();
-        &mut self.buf.as_mut_slice()[..len]
+        unsafe { slice_assume_init_mut(&mut self.as_uninit_slice_mut()[..len]) }
     }
 
     #[inline]
-    pub fn as_slice(&self) -> &[I::Item] {
-        unsafe { slice_assume_init_ref(self.as_uninit_slice()) }
+    pub fn as_slices(&self) -> (&[I::Item], &[I::Item]) {
+        let buf = self.as_init_slice();
+        let cap = self.capacity();
+        let idx = self.write_idx.saturating_sub(cap) % cap; // 0 if self.write_idx < cap else self.write_idx % cap
+        let (tail, head) = buf.split_at(idx);
+        (head, tail)
     }
 
     #[inline]
-    pub fn as_mut_slice(&mut self) -> &mut [I::Item] {
-        unsafe { slice_assume_init_mut(self.as_uninit_slice_mut()) }
+    pub fn as_mut_slices(&mut self) -> (&mut [I::Item], &mut [I::Item]) {
+        let cap = self.capacity();
+        let idx = self.write_idx.saturating_sub(cap) % cap; // 0 if self.write_idx < cap else self.write_idx % cap
+        let buf = self.as_init_slice_mut();
+        let (tail, head) = buf.split_at_mut(idx);
+        (head, tail)
+    }
+
+    pub fn range<R: RangeBounds<usize>>(&self, range: R) -> (&[I::Item], &[I::Item]) {
+        let len = self.len();
+        let Range { start, end } = slice_range(range, ..len);
+
+        let (head, tail) = self.as_slices();
+        if start < head.len() && end <= head.len() {
+            (&head[start..end], &[])
+        } else if start < head.len() {
+            let end = end - head.len();
+            (&head[start..], &tail[..end])
+        } else {
+            let start = start - head.len();
+            let end = end - head.len();
+            (&[], &tail[start..end])
+        }
+    }
+
+    pub fn range_mut<R: RangeBounds<usize>>(
+        &mut self,
+        range: R,
+    ) -> (&mut [I::Item], &mut [I::Item]) {
+        let len = self.len();
+        let Range { start, end } = slice_range(range, ..len);
+
+        let (head, tail) = self.as_mut_slices();
+        if start < head.len() && end <= head.len() {
+            (&mut head[start..end], &mut [])
+        } else if start < head.len() {
+            let end = end - head.len();
+            (&mut head[start..], &mut tail[..end])
+        } else {
+            let start = start - head.len();
+            let end = end - head.len();
+            (&mut [], &mut tail[start..end])
+        }
     }
 }
 
@@ -103,6 +160,31 @@ impl<I: Iterator, B: StaticArray<Item = I::Item>> KeepLast<I, B> {
             write_idx: 0,
             backtrack: 0,
         }
+    }
+}
+
+impl<I: Iterator, B: Array<Item = I::Item>> Index<usize> for KeepLast<I, B> {
+    type Output = I::Item;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        let len = self.len();
+        assert!(index < len);
+
+        let (head, tail) = self.as_slices();
+        head.get(index)
+            .unwrap_or_else(|| unsafe { tail.get_unchecked(index - head.len()) })
+    }
+}
+
+impl<I: Iterator, B: Array<Item = I::Item>> IndexMut<usize> for KeepLast<I, B> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        let len = self.len();
+        assert!(index < len);
+
+        let (head, tail) = self.as_mut_slices();
+        let head_len = head.len();
+        head.get_mut(index)
+            .unwrap_or_else(|| unsafe { tail.get_unchecked_mut(index - head_len) })
     }
 }
 
@@ -137,14 +219,14 @@ where
 impl<I: Iterator, B: Array<Item = I::Item>> AsRef<[I::Item]> for KeepLast<I, B> {
     #[inline]
     fn as_ref(&self) -> &[I::Item] {
-        self.as_slice()
+        self.as_init_slice()
     }
 }
 
 impl<I: Iterator, B: Array<Item = I::Item>> AsMut<[I::Item]> for KeepLast<I, B> {
     #[inline]
     fn as_mut(&mut self) -> &mut [I::Item] {
-        self.as_mut_slice()
+        self.as_init_slice_mut()
     }
 }
 
@@ -152,20 +234,6 @@ impl<I: Iterator, B: Array<Item = I::Item>> Drop for KeepLast<I, B> {
     #[inline]
     fn drop(&mut self) {
         self.clear();
-    }
-}
-
-impl<I: Iterator, B: Array<Item = I::Item>> Deref for KeepLast<I, B> {
-    type Target = [I::Item];
-
-    fn deref(&self) -> &Self::Target {
-        self.as_slice()
-    }
-}
-
-impl<I: Iterator, B: Array<Item = I::Item>> DerefMut for KeepLast<I, B> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.as_mut_slice()
     }
 }
 
@@ -207,7 +275,7 @@ mod test {
         assert_eq!(keep_last.next().as_deref(), Some(&2));
 
         assert!(keep_last
-            .as_slice()
+            .as_init_slice()
             .iter()
             .map(Deref::deref)
             .copied()
@@ -220,7 +288,7 @@ mod test {
         assert_eq!(keep_last.next().as_deref(), Some(&1));
         assert_eq!(keep_last.next().as_deref(), Some(&2));
 
-        keep_last[0] = Box::new(-1);
+        keep_last.as_mut()[0] = Box::new(-1);
 
         keep_last.backtrack(5);
         assert_eq!(keep_last.position(), 3);
@@ -234,7 +302,7 @@ mod test {
         }
 
         assert!(keep_last
-            .as_slice()
+            .as_init_slice()
             .iter()
             .map(Deref::deref)
             .copied()
